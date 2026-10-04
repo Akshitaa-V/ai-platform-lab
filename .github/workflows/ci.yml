@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      observability:
+        description: "Also start Langfuse + Postgres in the stack test"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint and unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - name: Scan the repository for committed secrets
+        run: aiplat secrets check
+
+  compose:
+    name: Validate Compose files and build the MCP image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: aiplat secrets init
+      - run: docker compose -f docker-compose.yml config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
+      - run: docker compose build mcp
+
+  stack:
+    # Pulls the real images and two small open-source models (about 3 GB), so it runs on
+    # demand from the Actions tab rather than on every push.
+    name: End-to-end stack test
+    if: github.event_name == 'workflow_dispatch'
+    needs: [test, compose]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_FILES: >-
+        -f docker-compose.yml
+        ${{ inputs.observability && '-f docker-compose.observability.yml' || '' }}
+      LANGFUSE_URL: ${{ inputs.observability && 'http://127.0.0.1:3000' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: aiplat secrets init
+      - name: Start the platform
+        run: docker compose $COMPOSE_FILES up -d --build
+      - name: Wait until every required service is healthy
+        run: |
+          for i in $(seq 1 90); do
+            if aiplat status; then exit 0; fi
+            sleep 10
+          done
+          aiplat status
+      - name: Smoke test (health, gateway chat, MCP tool call)
+        run: aiplat smoke --model qwen2.5-0.5b
+      - name: Compare the served models
+        run: aiplat eval --out reports
+      - name: Check the gateway falls back when a model is unavailable
+        run: |
+          docker compose exec -T ollama ollama rm llama3.2:1b
+          aiplat chat llama3.2-1b "Reply with the single word: ready" --max-tokens 10
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: reports/
+          if-no-files-found: ignore
+      - name: Logs on failure
+        if: failure()
+        run: docker compose $COMPOSE_FILES logs --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose $COMPOSE_FILES down -v

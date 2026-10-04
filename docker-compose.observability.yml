@@ -1,0 +1,81 @@
+# Adds tracing: Langfuse (v2) with its Postgres database, and switches the gateway
+# to a config that sends every request to Langfuse.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#
+# Postgres reads its password from a Docker secret (POSTGRES_PASSWORD_FILE).
+# Langfuse only reads environment variables, so its values come from
+# .env.observability, which `aiplat secrets init` generates and git ignores.
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_DB: langfuse
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - langfuse-db:/var/lib/postgresql/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+    restart: unless-stopped
+
+  langfuse:
+    image: ${LANGFUSE_IMAGE:-langfuse/langfuse:2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.observability
+    environment:
+      NEXTAUTH_URL: "http://localhost:3000"
+      HOSTNAME: "0.0.0.0"
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: "platform-lab"
+      LANGFUSE_INIT_ORG_NAME: "AI Platform Lab"
+      LANGFUSE_INIT_PROJECT_ID: "gateway"
+      LANGFUSE_INIT_PROJECT_NAME: "gateway"
+      LANGFUSE_INIT_USER_EMAIL: "admin@platform.local"
+      LANGFUSE_INIT_USER_NAME: "admin"
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/public/health"]
+    restart: unless-stopped
+
+  gateway:
+    depends_on:
+      langfuse:
+        condition: service_healthy
+    environment:
+      LANGFUSE_HOST: "http://langfuse:3000"
+    volumes:
+      - ./gateway/config.observability.yaml:/app/config.yaml:ro
+    secrets:
+      - litellm_master_key
+      - langfuse_public_key
+      - langfuse_secret_key
+
+  mcp:
+    environment:
+      LANGFUSE_URL: "http://langfuse:3000"
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  langfuse_public_key:
+    file: ./secrets/langfuse_public_key.txt
+  langfuse_secret_key:
+    file: ./secrets/langfuse_secret_key.txt
+
+volumes:
+  langfuse-db:

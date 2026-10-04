@@ -1,0 +1,105 @@
+# Self-hosted AI platform lab.
+#
+#   ollama       open-source model inference (CPU by default, GPU via docker-compose.gpu.yml)
+#   ollama-init  one-shot job that pulls the models listed in PLATFORM_MODELS
+#   gateway      LiteLLM proxy: one OpenAI-compatible API, key auth, retries and fallbacks
+#   mcp          MCP server (Streamable HTTP) exposing the platform to agents and coding tools
+#
+# Observability (Langfuse + Postgres) is added with docker-compose.observability.yml.
+# Every port is bound to 127.0.0.1 only. Secrets come from ./secrets (gitignored),
+# created by `aiplat secrets init`.
+
+name: ai-platform-lab
+
+x-healthcheck: &healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 12
+  start_period: 30s
+
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.6.8}
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "ollama", "list"]
+    restart: unless-stopped
+
+  ollama-init:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.6.8}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      PLATFORM_MODELS: ${PLATFORM_MODELS:-qwen2.5:0.5b llama3.2:1b}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['for m in $$PLATFORM_MODELS; do echo "pulling $$m"; ollama pull "$$m" || exit 1; done']
+    restart: "no"
+
+  gateway:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "/platform/env-from-secrets.sh"]
+    command: ["litellm", "--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      - ./gateway/config.yaml:/app/config.yaml:ro
+      - ./platform/env-from-secrets.sh:/platform/env-from-secrets.sh:ro
+    secrets:
+      - litellm_master_key
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      <<: *healthcheck
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=4)"
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    image: ai-platform-lab/mcp:local
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+      GATEWAY_URL: "http://gateway:4000"
+      OLLAMA_URL: "http://ollama:11434"
+      MCP_URL: "http://mcp:8000"
+      LANGFUSE_URL: ""
+    secrets:
+      - litellm_master_key
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      <<: *healthcheck
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"
+    restart: unless-stopped
+
+secrets:
+  litellm_master_key:
+    file: ./secrets/litellm_master_key.txt
+
+volumes:
+  ollama-models:

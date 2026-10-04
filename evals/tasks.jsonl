@@ -1,0 +1,12 @@
+{"id": "arith-torque", "prompt": "A bolt needs 45 Nm and the wrench reads 38 Nm. How many Nm are missing? Answer with the number only.", "check": "regex", "expected": "^\\s*7(\\.0+)?\\s*(nm)?\\.?\\s*$"}
+{"id": "unit-km-m", "prompt": "Convert 2.5 kilometres to metres. Answer with the number only.", "check": "regex", "expected": "^\\s*2,?500(\\.0+)?\\s*(m|metres|meters)?\\.?\\s*$"}
+{"id": "capital-bavaria", "prompt": "What is the capital of Bavaria? Answer with one word.", "check": "contains", "expected": "munich"}
+{"id": "ticket-priority", "prompt": "Classify the priority of this ticket as LOW, MEDIUM or HIGH. Ticket: 'The test stand pressure sensor reads zero during a live run.' Answer with one word.", "check": "contains", "expected": "high"}
+{"id": "ticket-priority-low", "prompt": "Classify the priority of this ticket as LOW, MEDIUM or HIGH. Ticket: 'Please fix a typo in the cafeteria menu page.' Answer with one word.", "check": "contains", "expected": "low"}
+{"id": "json-extract-part", "prompt": "Extract the part number and quantity from this note and return only JSON with keys part and qty: 'Need 4 units of part VLV-220 for Monday.'", "check": "json_keys", "expected": {"part": "VLV-220", "qty": "4"}}
+{"id": "json-keys-incident", "prompt": "Return only a JSON object with the keys system, severity and summary for this incident: 'Cooling pump on stand B tripped twice, no damage.'", "check": "json_keys", "expected": ["system", "severity", "summary"]}
+{"id": "yes-no-units", "prompt": "Is 1 kilogram heavier than 900 grams? Answer yes or no.", "check": "contains", "expected": "yes"}
+{"id": "sequence-next", "prompt": "What number comes next: 2, 4, 8, 16? Answer with the number only.", "check": "regex", "expected": "^\\s*32\\.?\\s*$"}
+{"id": "extract-date", "prompt": "From 'Static fire rescheduled to 2026-11-14 at 09:30', return only the date in YYYY-MM-DD format.", "check": "contains", "expected": "2026-11-14"}
+{"id": "follow-format", "prompt": "List three primary colours separated by commas, all lowercase, and nothing else.", "check": "regex", "expected": "^\\s*[a-z]+\\s*,\\s*[a-z]+\\s*,\\s*[a-z]+\\s*\\.?\\s*$"}
+{"id": "code-python-len", "prompt": "In Python, what does len('platform') return? Answer with the number only.", "check": "regex", "expected": "^\\s*8\\.?\\s*$"}

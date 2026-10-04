@@ -1,0 +1,17 @@
+# MCP server image: small, non-root, read-only filesystem at runtime.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    RUNBOOK_DIR=/app/docs/runbooks
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install . && useradd --system --uid 10001 --no-create-home mcp
+COPY docs/runbooks ./docs/runbooks
+
+USER mcp
+EXPOSE 8000
+CMD ["python", "-m", "aiplat.mcp_server"]

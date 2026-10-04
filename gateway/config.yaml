@@ -1,0 +1,33 @@
+# LiteLLM gateway: one OpenAI-compatible API in front of every model.
+# Model names here are what clients use; litellm_params say where each one runs.
+
+model_list:
+  - model_name: qwen2.5-0.5b
+    litellm_params:
+      model: ollama_chat/qwen2.5:0.5b
+      api_base: http://ollama:11434
+  - model_name: llama3.2-1b
+    litellm_params:
+      model: ollama_chat/llama3.2:1b
+      api_base: http://ollama:11434
+
+  # Optional hosted model. Uncomment, add secrets/openai_api_key.txt and list
+  # openai_api_key under the gateway's secrets in docker-compose.yml.
+  # - model_name: gpt-4o-mini
+  #   litellm_params:
+  #     model: openai/gpt-4o-mini
+  #     api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  num_retries: 1
+  timeout: 120
+  # If the larger model fails or times out, the same request goes to the smaller one.
+  fallbacks:
+    - llama3.2-1b: ["qwen2.5-0.5b"]
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
